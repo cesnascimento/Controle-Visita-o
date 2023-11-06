@@ -1,405 +1,172 @@
+import datetime
 import streamlit as st
 import pandas as pd
-from datetime import datetime
-import ast
-import re
 
-# Carregar os dados
-data = pd.read_csv('sharepoint_data.csv')
-data['Data'] = pd.to_datetime(data['Data'], errors='coerce')
-data['Ruptura'] = data['Ruptura'].apply(lambda x: 'SIM' if x else 'NÃO')
+# Função para carregar os dados
+@st.cache_data
+def load_data():
+    data = pd.read_csv('sharepoint_data.csv')
+    # Convertendo as colunas de data de string para datetime
+    data['Data'] = pd.to_datetime(data['Data'], errors='coerce')
+    data['Criado'] = pd.to_datetime(data['Criado'], errors='coerce')
+    data['Modificado'] = pd.to_datetime(data['Modificado'], errors='coerce')
+    data['Produtos'] = data['Produtos'].fillna('Sem produtos')
+    data['Produtos'] = data['Produtos'].apply(lambda x: [i.strip() for i in str(x).split(',') if i])
+    data['Ruptura'] = data['Ruptura'].replace({'Yes': 'Sim', 'No': 'Não'})
+    return data
 
-# Opções para o usuário escolher
-tab_options = ["Visualização de Visita",
-               "Visualização de Ruptura", "Visualização de Imagens"]
-chosen_tab = st.radio("Escolha uma aba:", tab_options)
+# Carregar dados
+df = load_data()
 
-if chosen_tab == "Visualização de Visita":
+# Título do painel
+st.title('Painel Administrativo de Visita')
 
-    st.sidebar.header('Filtros')
 
-    # Filtros e visualização de dados...
+# Criar abas
+tab1, tab2, tab3 = st.tabs(["Painel Geral", "Painel Ruptura", "Painel Imagens"])
 
-    selected_data = st.sidebar.date_input(
-        'Selecione a faixa de datas',
-        min_value=data['Data'].min().date(),
-        max_value=data['Data'].max().date(),
-        value=(data['Data'].min().date(), data['Data'].max().date()),
-        key='select_data'
-    )
-    selected_rede = st.sidebar.multiselect(
-        'Selecione a(s) rede(s)',
-        options=list(data['Rede'].unique()),
-        key='select_rede'
-    )
-    selected_funcao = st.sidebar.multiselect(
-        'Selecione a(s) função(ões)',
-        options=list(data['Funcao'].unique()),
-        key='select_funcao'
-    )
-    selected_pessoa = st.sidebar.multiselect(
-        'Selecione a(s) pessoa(s)',
-        options=list(data['Created By'].unique()),
-        key='select_pessoa'
-    )
+# Filtros (omitidos para brevidade, podem ser adicionados conforme necessidade)
+# Filtros para cada coluna especificada
+with tab1:
+    if 'Localizacao' in df.columns:
+        localizacao = st.sidebar.multiselect('Localização:', options=df['Localizacao'].unique())
+        if localizacao:
+            df = df[df['Localizacao'].isin(localizacao)]
 
-    # Conversão e filtros de data...
-    start_date = pd.Timestamp(selected_data[0])
-    end_date = pd.Timestamp(selected_data[1])
-    data = data[(data['Data'] >= start_date) & (data['Data'] <= end_date)]
+    if 'Rede' in df.columns:
+        rede = st.sidebar.multiselect('Rede:', options=df['Rede'].unique())
+        if rede:
+            df = df[df['Rede'].isin(rede)]
 
-    if selected_pessoa:
-        data = data[data['Created By'].isin(selected_pessoa)]
-    if selected_rede:
-        data = data[data['Rede'].isin(selected_rede)]
-    if selected_funcao:
-        data = data[data['Funcao'].isin(selected_funcao)]
+    if 'Funcao' in df.columns:
+        funcao = st.sidebar.multiselect('Função:', options=df['Funcao'].unique())
+        if funcao:
+            df = df[df['Funcao'].isin(funcao)]
 
-    # Prefixo da URL das imagens e função para criar links HTML das imagens...
-    img_url_prefix = "https://dermage.sharepoint.com/sites/AdminHomePage/SiteAssets/Lists/a71446a8-a43c-4fde-ab80-a8440de77d91/"
+    if 'Produtos' in df.columns:
+        # Criar uma lista de todos os produtos únicos
+        all_products = set()
+        for product_list in df['Produtos'].dropna():
+            all_products.update(product_list)
+        # Usuário pode selecionar produtos individuais
+        selected_products = st.sidebar.multiselect('Produtos:', options=sorted(all_products))
+        if selected_products:
+            # Filtrar linhas que contêm os produtos selecionados
+            mask = df['Produtos'].apply(lambda x: any(item for item in selected_products if item in x))
+            df = df[mask]
 
-    def create_image_link(row):
-        img_html = ""
-        for img_col in ['Imagem1', 'Imagem2', 'Imagem3', 'Imagem4', 'Imagem5']:
-            img = row[img_col]
-            if pd.notna(img):
-                img_html += (
-                    f'<a href="{img_url_prefix}{img}" target="_blank">'
-                    f'<img src="{img_url_prefix}{img}" style="width:100px;"></a>'
-                )
-        return img_html
+    if 'Criado por' in df.columns:
+        criado_por = st.sidebar.multiselect('Criado por:', options=df['Criado por'].unique())
+        if criado_por:
+            df = df[df['Criado por'].isin(criado_por)]
 
-    data['Imagens'] = data.apply(create_image_link, axis=1)
-    data = data.drop(columns=['Imagem1', 'Imagem2',
-                     'Imagem3', 'Imagem4', 'Imagem5'])
+    # Filtro por intervalo de datas
+    if 'Data' in df.columns:
+        # Encontrar a data mínima e máxima para definir o range dos datepickers
+        min_date = df['Data'].min().date() if df['Data'].min() is not pd.NaT else datetime.now().date()
+        max_date = df['Data'].max().date() if df['Data'].max() is not pd.NaT else datetime.now().date()
+        # Permitir que o usuário escolha um intervalo de datas
+        data_inicial, data_final = st.date_input('Escolha um intervalo de datas:', [min_date, max_date])
+        if data_inicial and data_final:
+            df = df[(df['Data'].dt.date >= data_inicial) & (df['Data'].dt.date <= data_final)]
+    
+    if 'Ruptura' in df.columns:
+        ruptura = st.multiselect('Ruptura:', options=df['Ruptura'].unique())
+        if ruptura:
+            df = df[df['Ruptura'].isin(ruptura)]
 
-    # Ordenação e estilização...
-    data = data[['Data', 'Created By', 'Rede',
-                 'Funcao', 'Ruptura', 'Produtos', 'Imagens']]
-    data = data.sort_values(by='Data', ascending=False)
 
-    style = """
+
+    # Ocultar colunas específicas
+    columns_to_hide = ['ID', 'Criado', 'Modificado', 'Modificado por', 'Imagem1', 'Imagem2', 'Imagem3', 'Imagem4', 'Imagem5']
+    df_display = df.drop(columns=columns_to_hide)
+
+    # Aplicar estilo Bootstrap na tabela
+    # Nota: Você pode querer hospedar seu próprio CSS ou usar um CDN diferente
+    bootstrap_css = """
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
     <style>
         .dataframe {
-            border-collapse: separate;
-            border-spacing: 0;
-            border: 2px solid #444444;
-            border-radius: 15px;
-            -moz-border-radius: 15px;
-            box-shadow: 0px 0px 15px rgba(0, 0, 0, 0.1);
-        }
-        .dataframe th {
-            background-color: #ddd;
-            color: black;
-            border-bottom: 2px solid #444444;
+            width: 100%;
+            border-collapse: collapse;
         }
         .dataframe th, .dataframe td {
-            border: none;
-            padding: 10px;
-        }
-        .dataframe tbody tr:nth-child(even) {
-            background-color: #f3f3f3;
-        }
-        .dataframe tbody tr:hover {
-            background-color: #ddd;
-        }
-    </style>
-    """
-    cols_to_hide = ['Produtos', 'Imagens']
-    st.markdown(style, unsafe_allow_html=True)
-    st.markdown(data.drop(columns=cols_to_hide).to_html(
-        index=False, escape=False), unsafe_allow_html=True)
-
-elif chosen_tab == "Visualização de Ruptura":
-    def adjusted_treat_product_string(s):
-        if not isinstance(s, str):
-            return s  # Return the original value if it's not a string
-        s = s.replace(';', ',').replace('#', ',')
-        if s.startswith(','):
-            s = s[1:]
-        if s.endswith(','):
-            s = s[:-1]
-        s = s.replace(',,', ',')
-        return s
-
-    def load_and_transform_data():
-        # Load the original data
-        data = pd.read_csv('sharepoint_data.csv')
-        # Convert the 'Data' column to datetime format
-        data['Data'] = pd.to_datetime(data['Data'])
-
-        # Apply the adjusted_treat_product_string function to the 'Produtos' column
-        data['Produtos'] = data['Produtos'].apply(
-            adjusted_treat_product_string)
-
-        # Split the 'Produtos' column by comma and then transform so that each product is on its own row
-        data['Produtos'] = data['Produtos'].str.split(',')
-        data = data.explode('Produtos', ignore_index=True)
-
-        # Remove leading and trailing spaces from the 'Produtos' column
-        data['Produtos'] = data['Produtos'].str.strip()
-
-        return data
-
-    data = load_and_transform_data()
-
-    # Sidebar
-    with st.sidebar:
-        st.header("Filtros")
-
-        # Date range filter
-        min_date = data['Data'].min().date()
-        max_date = data['Data'].max().date()
-        start_date, end_date = st.date_input(
-            "Escolha o intervalo de datas:", [min_date, max_date])
-
-        # Product filter
-        unique_products = data['Produtos'].dropna().unique()
-        selected_products = st.multiselect(
-            "Selecione os produtos:", sorted(unique_products))
-
-        # Rede filter
-        unique_redes = data['Rede'].dropna().unique()
-        selected_redes = st.multiselect(
-            "Selecione as redes:", sorted(unique_redes))
-
-        # Função filter
-        unique_funcoes = data['Funcao'].dropna().unique()
-        selected_funcoes = st.multiselect(
-            "Selecione as funções:", sorted(unique_funcoes))
-
-        # Pessoa filter
-        unique_pessoas = data['Created By'].dropna().unique()
-        selected_pessoas = st.multiselect(
-            "Selecione as pessoas:", sorted(unique_pessoas))
-
-    # Convert the selected date range to datetime for filtering
-    start_datetime = datetime.combine(start_date, datetime.min.time())
-    end_datetime = datetime.combine(end_date, datetime.max.time())
-
-    # Filter data by the selected criteria
-    filtered_data = data[(data['Data'] >= start_datetime) & (
-        data['Data'] <= end_datetime) & (data['Ruptura'] == 'Yes')]
-    if selected_products:
-        filtered_data = filtered_data[filtered_data['Produtos'].isin(
-            selected_products)]
-    if selected_redes:
-        filtered_data = filtered_data[filtered_data['Rede'].isin(
-            selected_redes)]
-    if selected_funcoes:
-        filtered_data = filtered_data[filtered_data['Funcao'].isin(
-            selected_funcoes)]
-    if selected_pessoas:
-        filtered_data = filtered_data[filtered_data['Created By'].isin(
-            selected_pessoas)]
-
-    # Estilo da tabela
-    style = """
-    <style>
-        .dataframe {
-            border-collapse: separate;
-            border-spacing: 0;
-            border: 2px solid #444444;
-            border-radius: 15px;
-            -moz-border-radius: 15px;
-            box-shadow: 0px 0px 15px rgba(0, 0, 0, 0.1);
+            border: 1px solid #dddddd;
+            padding: 8px;
+            text-align: left;
         }
         .dataframe th {
-            background-color: #ddd;
-            color: black;
-            border-bottom: 2px solid #444444;
-        }
-        .dataframe th, .dataframe td {
-            border: none;
-            padding: 10px;
-        }
-        .dataframe tbody tr:nth-child(even) {
-            background-color: #f3f3f3;
-        }
-        .dataframe tbody tr:hover {
-            background-color: #ddd;
-        }
-        .dataframe td {
-            white-space: nowrap;  /* Evita que o texto nas células seja quebrado em várias linhas */
-            overflow: visible;  /* Exibe todo o texto, mesmo se ele não couber na célula */
-            text-overflow: clip;  /* Evita a adição de "..." no final do texto cortado */
+            background-color: #007bff;
+            color: white;
         }
     </style>
     """
 
-    columns_to_hide = ['ID', 'Ruptura', 'Created', 'Modified', 'Modified By', 'Imagem1', 'Imagem2',
-                       'Imagem3', 'Imagem4', 'Imagem5']
-    filtered_data = filtered_data.drop(columns=columns_to_hide)
+    # Injeta o CSS do Bootstrap na página
+    st.markdown(bootstrap_css, unsafe_allow_html=True)
 
-    localizacao = filtered_data['Localizacao']
+    # Mostrar dados filtrados com estilo Bootstrap
+    st.markdown(df_display.to_html(classes='table table-striped', index=False), unsafe_allow_html=True)
+with tab2:
+    
+    # Filtro de intervalo de datas apenas para esta aba
+    data_inicial_tab2, data_final_tab2 = st.date_input('Escolha um intervalo de datas (Ruptura SIM):', [min_date, max_date], key="date_range_ruptura_sim")
+    
+    # Filtro para Ruptura já aplicado, mostrando apenas "SIM"
+    df_ruptura_sim = df[df['Ruptura'] == 'Sim']
 
-    # Descartando a coluna "Localização" do DataFrame
-    filtered_data = filtered_data.drop(columns='Localizacao')
+    if data_inicial_tab2 and data_final_tab2:
+        df_ruptura_sim = df_ruptura_sim[(df_ruptura_sim['Data'].dt.date >= data_inicial_tab2) & (df_ruptura_sim['Data'].dt.date <= data_final_tab2)]
 
-    # Adicionando a coluna "Localização" de volta ao DataFrame
-    filtered_data['Localização'] = localizacao
-    st.markdown(style, unsafe_allow_html=True)
+    # Ocultar colunas específicas
+    columns_to_hide = ['ID', 'Criado', 'Modificado', 'Modificado por', 'Imagem1', 'Imagem2', 'Imagem3', 'Imagem4', 'Imagem5']
+    df_ruptura_sim_display = df_ruptura_sim.drop(columns=columns_to_hide)
 
-    # Convertendo o DataFrame para uma string HTML
-    table_html = filtered_data.to_html(index=False, escape=False)
+    # Mostrar dados filtrados com estilo Bootstrap
+    st.markdown(df_ruptura_sim_display.to_html(classes='table table-striped', index=False), unsafe_allow_html=True)
 
-    # Exibindo a tabela no Streamlit com o estilo aplicado
-    st.markdown(table_html, unsafe_allow_html=True)
+with tab3:
+    # Filtro para mostrar apenas dados com ruptura SIM e com imagens
+    df_with_images_and_rupture = df[(df['Ruptura'] == 'Sim') & (df[['Imagem1', 'Imagem2', 'Imagem3', 'Imagem4', 'Imagem5']].notnull().any(axis=1))]
+    
+    # Função para formatar a coluna de imagem com HTML para exibir a imagem ou um texto alternativo
+    def format_image_column(image_url):
+        if pd.notnull(image_url):
+            return f'<a href="{image_url}" target="_blank"><img src="{image_url}" width="100" /></a>'
+        return "Sem foto"
+    
+    data_inicial_tab3, data_final_tab3 = st.date_input('Escolha um intervalo de datas (Imagens):', [min_date, max_date], key="date_range_ruptura_imagem")
+    
+    if data_inicial_tab3 and data_final_tab3:
+        df_ruptura_sim = df_ruptura_sim[(df_ruptura_sim['Data'].dt.date >= data_inicial_tab2) & (df_with_images_and_rupture['Data'].dt.date <= data_final_tab2)]
 
 
-if chosen_tab == "Visualização de Imagens":
-    def adjusted_treat_product_string(s):
-        if not isinstance(s, str):
-            return s  # Return the original value if it's not a string
-        s = s.replace(';', ',').replace('#', ',')
-        if s.startswith(','):
-            s = s[1:]
-        if s.endswith(','):
-            s = s[:-1]
-        s = s.replace(',,', ',')
-        return s
+    # Aplicar a função de formatação para cada coluna de imagem
+    for col in ['Imagem1', 'Imagem2', 'Imagem3', 'Imagem4', 'Imagem5']:
+        df_with_images_and_rupture[col] = df_with_images_and_rupture[col].apply(format_image_column)
 
-    def load_and_transform_data():
-        # Load the original data
-        data = pd.read_csv('sharepoint_data.csv')
-        # Convert the 'Data' column to datetime format
-        data['Data'] = pd.to_datetime(data['Data'])
+    columns_to_hide = ['ID', 'Criado', 'Modificado', 'Modificado por']
+    df_with_images_and_rupture = df_with_images_and_rupture.drop(columns=columns_to_hide)
 
-        # Apply the adjusted_treat_product_string function to the 'Produtos' column
-        data['Produtos'] = data['Produtos'].apply(
-            adjusted_treat_product_string)
-
-        # Split the 'Produtos' column by comma and then transform so that each product is on its own row
-        data['Produtos'] = data['Produtos'].str.split(',')
-        data = data.explode('Produtos', ignore_index=True)
-
-        # Remove leading and trailing spaces from the 'Produtos' column
-        data['Produtos'] = data['Produtos'].str.strip()
-
-        return data
-
-    data = load_and_transform_data()
-
-    # Sidebar
-    with st.sidebar:
-        st.header("Filtros")
-
-        # Date range filter
-        min_date = data['Data'].min().date()
-        max_date = data['Data'].max().date()
-        start_date, end_date = st.date_input(
-            "Escolha o intervalo de datas:", [min_date, max_date])
-
-        # Product filter
-        unique_products = data['Produtos'].dropna().unique()
-        selected_products = st.multiselect(
-            "Selecione os produtos:", sorted(unique_products))
-
-        # Rede filter
-        unique_redes = data['Rede'].dropna().unique()
-        selected_redes = st.multiselect(
-            "Selecione as redes:", sorted(unique_redes))
-
-        # Função filter
-        unique_funcoes = data['Funcao'].dropna().unique()
-        selected_funcoes = st.multiselect(
-            "Selecione as funções:", sorted(unique_funcoes))
-
-        # Pessoa filter
-        unique_pessoas = data['Created By'].dropna().unique()
-        selected_pessoas = st.multiselect(
-            "Selecione as pessoas:", sorted(unique_pessoas))
-
-    # Convert the selected date range to datetime for filtering
-    start_datetime = datetime.combine(start_date, datetime.min.time())
-    end_datetime = datetime.combine(end_date, datetime.max.time())
-
-    # Filter data by the selected criteria
-    filtered_data = data[(data['Data'] >= start_datetime) & (
-        data['Data'] <= end_datetime) & (data['Ruptura'] == 'Yes')]
-    if selected_products:
-        filtered_data = filtered_data[filtered_data['Produtos'].isin(
-            selected_products)]
-    if selected_redes:
-        filtered_data = filtered_data[filtered_data['Rede'].isin(
-            selected_redes)]
-    if selected_funcoes:
-        filtered_data = filtered_data[filtered_data['Funcao'].isin(
-            selected_funcoes)]
-    if selected_pessoas:
-        filtered_data = filtered_data[filtered_data['Created By'].isin(
-            selected_pessoas)]
-
-    # Estilo da tabela
-    style = """
+    # Mostrar dados filtrados com estilo Bootstrap
+    st.markdown(df_with_images_and_rupture.to_html(classes='table table-striped', escape=False, index=False), unsafe_allow_html=True)
+# Código para estilo Bootstrap (colocado fora das abas se for comum a ambas)
+bootstrap_css = """
+<link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
 <style>
     .dataframe {
-        border-collapse: collapse;  /* Ajustado para collapse para ter bordas uniformes */
-        border: 2px solid #444444;
-        border-radius: 15px;
-        -moz-border-radius: 15px;
-        box-shadow: 0px 0px 15px rgba(0, 0, 0, 0.1);
-        table-layout: fixed;
-        width: 90%;
-        margin: 3px auto;
+        width: 100%;
+        border-collapse: collapse;
+    }
+    .dataframe th, .dataframe td {
+        border: 1px solid #dddddd;
+        padding: 8px;
+        text-align: left;
     }
     .dataframe th {
-        background-color: #ddd;
-        color: black;
-        border: 1px solid #444444;  /* Adiciona bordas às células do cabeçalho */
-        font-size: 0.9em;
-        text-align: center;
-        vertical-align: middle;
-        width: 150px;  /* Define uma largura fixa para as células do cabeçalho */
-    }
-    .dataframe td {
-        border: 1px solid #ddd;  /* Adiciona bordas às células de dados */
-        padding: 5px;
-        font-size: 0.8em;
-        text-align: left;
-        vertical-align: top;
-        white-space: normal;  /* Permite que o texto nas células seja quebrado conforme necessário */
-        overflow: hidden;  /* Oculta o conteúdo que excede os limites da célula */
-        width: 150px;  /* Define uma largura fixa para as células de dados */
-    }
-    .dataframe tbody tr:nth-child(even) {
-        background-color: #f3f3f3;
-    }
-    .dataframe tbody tr:hover {
-        background-color: #ddd;
-    }
-    img {
-        max-width: 80px;
-        border-radius: 5px;
+        background-color: #007bff;
+        color: white;
     }
 </style>
 """
-
-    columns_to_hide = ['ID', 'Ruptura', 'Created', 'Modified', 'Modified By']
-    filtered_data = filtered_data.drop(columns=columns_to_hide)
-
-    localizacao = filtered_data['Localizacao']
-
-    # Descartando a coluna "Localização" do DataFrame
-    filtered_data = filtered_data.drop(columns='Localizacao')
-
-    # Adicionando a coluna "Localização" de volta ao DataFrame
-    filtered_data['Localizacao'] = localizacao
-
-    # Função para criar links HTML das imagens que mostram a imagem diretamente na tabela
-    def create_image_link(img):
-        if pd.notna(img):
-            return f'<a href="{img}" target="_blank"><img src="{img}" style="width:100px;"></a>'
-        return ""
-
-    # Aplicando a função para criar os links das imagens para cada coluna de imagem
-    for img_col in ['Imagem1', 'Imagem2', 'Imagem3', 'Imagem4', 'Imagem5']:
-        filtered_data[img_col] = filtered_data[img_col].apply(
-            create_image_link)
-
-    # ...
-
-    # Exibindo a tabela no Streamlit
-    st.markdown(style, unsafe_allow_html=True)
-    table_html = filtered_data.to_html(index=False, escape=False)
-    st.markdown(table_html, unsafe_allow_html=True)
+st.markdown(bootstrap_css, unsafe_allow_html=True)
