@@ -102,11 +102,24 @@ with tab1:
         if ruptura:
             df = df[df['Ruptura'].isin(ruptura)]
 
-    # Ocultar colunas específicas
-    columns_to_hide = ['ID', 'Criado', 'Modificado', 'Modificado por',
-                       'Imagem1', 'Imagem2', 'Imagem3', 'Imagem4', 'Imagem5']
-    df_display = df.drop(columns=columns_to_hide)
+    show_images = st.sidebar.checkbox('Mostrar Imagens')
 
+    def format_image_column(image_url):
+        if pd.notnull(image_url):
+            return f'<a href="{image_url}" target="_blank"><img src="{image_url}" width="100" /></a>'
+        return "Sem foto"
+
+    # Ocultar colunas específicas
+    columns_to_hide = ['ID', 'Criado', 'Modificado', 'Modificado por',]
+
+    if not show_images:
+        columns_to_hide.extend(
+            ['Imagem1', 'Imagem2', 'Imagem3', 'Imagem4', 'Imagem5'])
+    for col in ['Imagem1', 'Imagem2', 'Imagem3', 'Imagem4', 'Imagem5']:
+        df[col] = df[col].apply(
+            format_image_column)
+
+    df_display = df.drop(columns=columns_to_hide)
     # Mostrar dados filtrados com estilo Bootstrap
     st.markdown(df_display.to_html(classes='table table-striped',
                 escape=False, index=False), unsafe_allow_html=True)
