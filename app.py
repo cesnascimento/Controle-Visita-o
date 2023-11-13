@@ -31,6 +31,7 @@ st.title('Painel Administrativo de Visita')
 tab1, tab2, tab3 = st.tabs(
     ["Painel Geral", "Painel Ruptura", "Painel Imagens"])
 
+
 # Filtros (omitidos para brevidade, podem ser adicionados conforme necessidade)
 # Filtros para cada coluna especificada
 with tab1:
@@ -115,11 +116,13 @@ with tab1:
     if not show_images:
         columns_to_hide.extend(
             ['Imagem1', 'Imagem2', 'Imagem3', 'Imagem4', 'Imagem5'])
-    for col in ['Imagem1', 'Imagem2', 'Imagem3', 'Imagem4', 'Imagem5']:
-        df[col] = df[col].apply(
-            format_image_column)
 
     df_display = df.drop(columns=columns_to_hide)
+    if show_images:
+        for col in ['Imagem1', 'Imagem2', 'Imagem3', 'Imagem4', 'Imagem5']:
+            df_display[col] = df_display[col].apply(
+                format_image_column)
+
     # Mostrar dados filtrados com estilo Bootstrap
     st.markdown(df_display.to_html(classes='table table-striped',
                 escape=False, index=False), unsafe_allow_html=True)
@@ -150,18 +153,17 @@ with tab3:
     df_with_images_and_rupture = df[(df['Ruptura'] == 'Sim') & (
         df[['Imagem1', 'Imagem2', 'Imagem3', 'Imagem4', 'Imagem5']].notnull().any(axis=1))]
 
-    # Função para formatar a coluna de imagem com HTML para exibir a imagem ou um texto alternativo
-    def format_image_column(image_url):
-        if pd.notnull(image_url):
-            return f'<a href="{image_url}" target="_blank"><img src="{image_url}" width="100" /></a>'
-        return "Sem foto"
-
     data_inicial_tab3, data_final_tab3 = st.date_input('Escolha um intervalo de datas (Imagens):', [
                                                        min_date, max_date], key="date_range_ruptura_imagem")
 
     if data_inicial_tab3 and data_final_tab3:
         df_ruptura_sim = df_ruptura_sim[(df_ruptura_sim['Data'].dt.date >= data_inicial_tab2) & (
             df_with_images_and_rupture['Data'].dt.date <= data_final_tab2)]
+
+    def format_image_column(image_url):
+        if pd.notnull(image_url):
+            return f'<a href="{image_url}" target="_blank"><img src="{image_url}" width="100" /></a>'
+        return "Sem foto"
 
     # Aplicar a função de formatação para cada coluna de imagem
     for col in ['Imagem1', 'Imagem2', 'Imagem3', 'Imagem4', 'Imagem5']:
